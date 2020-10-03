@@ -23,7 +23,9 @@ type NatsConfig struct {
 	ClientName  string
 	EventName   string
 	LogPayload  bool
+	LogHeader   bool
 	nclient     stan.Conn
+	logger      logging.Logger
 }
 
 //Payload message payload
@@ -32,6 +34,7 @@ type Payload struct {
 	Path      string      `json:"path,omitempty" mapstructure:"path"`
 	URL       string      `json:"url,omitempty" mapstructure:"url"`
 	Data      interface{} `json:"data,omitempty" mapstructure:"data"`
+	Headers   interface{} `json:"headers,omitempty" mapstructure:"headers"`
 	Requestor interface{} `json:"requestor,omitempty" mapstructure:"requestor"`
 	IPAddress string      `json:"ip_address,omitempty" mapstructure:"ip_address"`
 }
@@ -86,6 +89,10 @@ func New(logger logging.Logger, config config.ExtraConfig) gin.HandlerFunc {
 			}
 		}
 
+		if cfg.LogHeader {
+			payload.Headers = c.Request.Header
+		}
+
 		c.Next()
 
 		cfg.publish(payload)
@@ -119,7 +126,7 @@ func configGetter(logger logging.Logger, config config.ExtraConfig) *NatsConfig 
 
 	name, ok := tmp["client_name"].(string)
 	if !ok {
-		return nil
+		name = "krakend"
 	}
 	cfg.ClientName = name
 
@@ -134,6 +141,11 @@ func configGetter(logger logging.Logger, config config.ExtraConfig) *NatsConfig 
 		cfg.LogPayload = lp
 	}
 
+	lh, ok := tmp["log_header"].(bool)
+	if ok {
+		cfg.LogHeader = lh
+	}
+
 	conn, err := stan.Connect(cfg.ClusterName, cfg.ClusterName, stan.NatsURL(cfg.NatsURL))
 	if err != nil {
 		logger.Error("[lognats] Error connecting to nats server ")
@@ -141,6 +153,7 @@ func configGetter(logger logging.Logger, config config.ExtraConfig) *NatsConfig 
 		return nil
 	}
 
+	cfg.logger = logger
 	cfg.nclient = conn
 
 	return cfg
@@ -149,6 +162,7 @@ func configGetter(logger logging.Logger, config config.ExtraConfig) *NatsConfig 
 func (l *NatsConfig) publish(data interface{}) error {
 	b, _ := json.Marshal(data)
 	if err := l.nclient.Publish(l.EventName, b); err != nil {
+		l.logger.Error("Error publishing event ", err)
 		return err
 	}
 	return nil
