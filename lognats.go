@@ -82,10 +82,12 @@ func New(logger logging.Logger, config config.ExtraConfig) gin.HandlerFunc {
 		if cfg.LogPayload {
 			raw, _ := ioutil.ReadAll(c.Request.Body)
 			//log.Println("RAW body ", raw)
-			c.Request.Body = ioutil.NopCloser(bytes.NewReader(raw))
-			var pl map[string]interface{}
-			if err := json.Unmarshal(raw, &pl); err == nil {
-				payload.Data = pl
+			if len(raw) > 0 {
+				c.Request.Body = ioutil.NopCloser(bytes.NewReader(raw))
+				var pl map[string]interface{}
+				if err := json.Unmarshal(raw, &pl); err == nil {
+					payload.Data = pl
+				}
 			}
 		}
 
