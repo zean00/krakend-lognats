@@ -14,6 +14,7 @@ import (
 )
 
 const authHeader = "Authorization"
+const forwardHeader = "X-Forwarded-For"
 const Namespace = "github_com/zean00/lognats"
 
 //NatsConfig log nats config
@@ -30,13 +31,15 @@ type NatsConfig struct {
 
 //Payload message payload
 type Payload struct {
-	Method    string      `json:"method,omitempty" mapstructure:"method"`
-	Path      string      `json:"path,omitempty" mapstructure:"path"`
-	URL       string      `json:"url,omitempty" mapstructure:"url"`
-	Data      interface{} `json:"data,omitempty" mapstructure:"data"`
-	Headers   interface{} `json:"headers,omitempty" mapstructure:"headers"`
-	Requestor interface{} `json:"requestor,omitempty" mapstructure:"requestor"`
-	IPAddress string      `json:"ip_address,omitempty" mapstructure:"ip_address"`
+	Method      string      `json:"method,omitempty" mapstructure:"method"`
+	Path        string      `json:"path,omitempty" mapstructure:"path"`
+	URL         string      `json:"url,omitempty" mapstructure:"url"`
+	Data        interface{} `json:"data,omitempty" mapstructure:"data"`
+	Headers     interface{} `json:"headers,omitempty" mapstructure:"headers"`
+	Requestor   interface{} `json:"requestor,omitempty" mapstructure:"requestor"`
+	StatusCode  int         `json:"status_code,omitempty" mapstructure:"status_code"`
+	IPAddress   string      `json:"ip_address,omitempty" mapstructure:"ip_address"`
+	ForwardedIP string      `json:"ip_forwarded,omitempty" mapstructure:"ip_forwarded"`
 }
 
 //New create middleware
@@ -51,18 +54,17 @@ func New(logger logging.Logger, config config.ExtraConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		payload := Payload{
-			Method: c.Request.Method,
-			URL:    c.Request.URL.RequestURI(),
-			Path:   c.Request.URL.Path,
+			Method:    c.Request.Method,
+			URL:       c.Request.URL.RequestURI(),
+			Path:      c.Request.URL.Path,
+			IPAddress: c.Request.RemoteAddr,
 		}
 
-		token := ""
-		auth, ok := c.Request.Header[authHeader]
-		if ok {
-			token = auth[0]
+		if fw := c.Request.Header.Get(forwardHeader); fw != "" {
+			payload.ForwardedIP = fw
 		}
 
-		if token != "" {
+		if token := c.Request.Header.Get(authHeader); token != "" {
 			token = strings.TrimPrefix(token, "Bearer ")
 			//Just in case using lower case bearer
 			token = strings.TrimPrefix(token, "bearer ")
@@ -96,6 +98,8 @@ func New(logger logging.Logger, config config.ExtraConfig) gin.HandlerFunc {
 		}
 
 		c.Next()
+
+		payload.StatusCode = c.Writer.Status()
 
 		cfg.publish(payload)
 	}
@@ -164,7 +168,7 @@ func configGetter(logger logging.Logger, config config.ExtraConfig) *NatsConfig 
 func (l *NatsConfig) publish(data interface{}) error {
 	b, _ := json.Marshal(data)
 	if err := l.nclient.Publish(l.EventName, b); err != nil {
-		l.logger.Error("Error publishing event ", err)
+		l.logger.Error("[lognats] Error publishing event ", err)
 		return err
 	}
 	return nil
